@@ -12,7 +12,7 @@ from utils import get_file_mtime, get_file_size, get_file_sha256
 
 def normalize(relative_path: str) -> str:
     # 使用Path处理路径，并返回标准化的相对路径
-    return str(Path(relative_path).relative_to(Path('.')).resolve())
+    return str(Path(relative_path).relative_to(Path('.')))
 
 
 def backup_file(file_path: str, label: str, instance: str) -> bool:
