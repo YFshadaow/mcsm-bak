@@ -38,7 +38,7 @@ def walk_files(base : str, current: str = None) -> Iterator[str]:
     base_path = Path(base)
     current_path = base_path if current is None else Path(current)
 
-    for entry in current_path.iterdir():
+    for entry in sorted(current_path.iterdir()):
         # 如果是文件，返回相对于 base 的路径
         if entry.is_file():
             yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
