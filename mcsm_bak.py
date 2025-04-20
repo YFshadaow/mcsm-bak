@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Iterator
 
 from config import target_path, exclusions, instances
 from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto_save
@@ -31,6 +32,20 @@ def backup_file(file_path: str, label: str, instance: str) -> bool:
     if result.returncode == 0:
         return True
     return False
+
+
+def walk_files(base : str, current: str = None) -> Iterator[str]:
+    base_path = Path(base)
+    current_path = base_path if current is None else Path(current)
+
+    for entry in current_path.iterdir():
+        # 如果是文件，返回相对于 base 的路径
+        if entry.is_file():
+            yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
+        elif entry.is_dir():
+            # 如果是目录，递归调用并返回子目录中的文件
+            yield from walk_files(base, str(entry))
+
 
 
 def is_excluded(file_path: str) -> bool:
@@ -135,11 +150,8 @@ def backup_instance(instance: str, label: str):
 
     cache = load_cache(label)
 
-    base_dir = Path('.')  # 当前目录
-    files = [str(path.relative_to(base_dir)) for path in base_dir.rglob('*') if path.is_file()]
-
     try:
-        for file in files:
+        for file in walk_files('.'):
             if is_excluded(file):
                 print(f'跳过排除文件 {file}')
                 continue
