@@ -52,7 +52,7 @@ def walk_files(base : str, current: str = None) -> Iterator[str]:
 
 def is_excluded(file_path: str) -> bool:
     # 排除缓存文件
-    if re.match(r'.+^\.mcsm_bak\..+\.json$', file_path):
+    if re.match(r'.*^\.mcsm_bak\..+\.json$', file_path):
         return True
     for pattern in exclusions:
         if re.match(pattern, file_path):
