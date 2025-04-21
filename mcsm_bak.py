@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -184,7 +185,14 @@ def config_logging():
     )
 
 
+def handle_sigterm(signum, frame):
+    logging.warning('接收到 SIGTERM 信号，正在退出...')
+    raise SystemExit('程序被终止')
+
+
 def main():
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
     if len(sys.argv) < 2:
         logging.warning("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
         sys.exit(1)
