@@ -192,6 +192,7 @@ def handle_sigterm(signum, frame):
 
 def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
+    config_logging()
 
     if len(sys.argv) < 2:
         logging.warning("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
