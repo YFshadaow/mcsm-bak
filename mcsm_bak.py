@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import subprocess
@@ -6,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Iterator
 
-from config import target_path, exclusions, instances
+from config import target_path, exclusions, instances, logging_level
 from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto_save
 from utils import get_file_mtime, get_file_size, get_file_sha256
 
@@ -88,47 +89,47 @@ def pre_backup(instance: str) -> bool:
 
     try:
         status = get_status(instance)
-        print(f'获取到实例 {instance} 的状态: {status}')
+        logging.info(f'获取到实例 {instance} 的状态: {status}')
         if status == Status.RUNNING:
-            print(f'实例 {instance} 正在运行，尝试关闭自动保存')
+            logging.info(f'实例 {instance} 正在运行，尝试关闭自动保存')
             try:
                 disable_auto_save(instance)
-                print(f'实例 {instance} 的自动保存已关闭，继续备份')
+                logging.info(f'实例 {instance} 的自动保存已关闭，继续备份')
                 return True
             except Exception as e:
-                print(f'实例 {instance} 的自动保存关闭失败: {e}，停止备份')
+                logging.warning(f'实例 {instance} 的自动保存关闭失败: {e}，停止备份')
                 return False
         else:
-            print(f'实例 {instance} 未在运行，继续备份')
+            logging.info(f'实例 {instance} 未在运行，继续备份')
             return True
     except Exception as e:
-        print(f'获取实例 {instance} 的状态失败: {e}，默认其未处于运行状态，继续备份')
+        logging.warning(f'获取实例 {instance} 的状态失败: {e}，默认其未处于运行状态，继续备份')
         return True
 
 
 def post_backup(instance: str):
     try:
         status = get_status(instance)
-        print(f'获取到实例 {instance} 的状态: {status}')
+        logging.info(f'获取到实例 {instance} 的状态: {status}')
         if status == Status.RUNNING:
-            print(f'实例 {instance} 正在运行，尝试恢复自动保存')
+            logging.info(f'实例 {instance} 正在运行，尝试恢复自动保存')
             try:
                 enable_auto_save(instance)
-                print(f'实例 {instance} 的自动保存已恢复')
+                logging.info(f'实例 {instance} 的自动保存已恢复')
             except Exception as e:
-                print(f'实例 {instance} 的自动保存恢复失败: {e}')
+                logging.warning(f'实例 {instance} 的自动保存恢复失败: {e}')
     except Exception as e:
-        print(f'获取实例 {instance} 的状态失败: {e}，无法恢复自动保存')
+        logging.warning(f'获取实例 {instance} 的状态失败: {e}，无法恢复自动保存')
 
 
 def load_cache(label: str) -> dict:
     cache_file = Path(f'.mcsm_bak.{label}.json')
     if cache_file.exists():
         with open(cache_file, 'r') as f:
-            print(f'读取缓存文件 {cache_file}')
+            logging.info(f'读取缓存文件 {cache_file}')
             return json.load(f)
     else:
-        print(f'未找到缓存文件 {cache_file}，将创建新的缓存')
+        logging.info(f'未找到缓存文件 {cache_file}，将创建新的缓存')
         return {}
 
 
@@ -136,15 +137,15 @@ def save_cache(label: str, cache: dict):
     cache_file = Path(f'.mcsm_bak.{label}.json')
     with open(cache_file, 'w', encoding='utf-8') as f:
         json.dump(cache, f, indent=4)
-        print(f'保存缓存文件 {cache_file}')
+        logging.info(f'保存缓存文件 {cache_file}')
 
 
 def backup_instance(instance: str, label: str):
     try:
         cwd = get_cwd(instance)
-        print(f'获取实例 {instance} 的当前工作目录: {cwd}')
+        logging.info(f'获取实例 {instance} 的当前工作目录: {cwd}')
     except Exception as e:
-        print(f'获取实例 {instance} 的当前工作目录失败: {e}，停止备份')
+        logging.warning(f'获取实例 {instance} 的当前工作目录失败: {e}，停止备份')
         return
     os.chdir(cwd)
 
@@ -156,31 +157,43 @@ def backup_instance(instance: str, label: str):
     try:
         for file in walk_files('.'):
             if is_excluded(file):
-                print(f'跳过排除文件 {file}')
+                logging.debug(f'跳过排除文件 {file}')
                 continue
             if not should_backup(file, cache):
-                print(f'跳过未修改文件 {file}')
+                logging.debug(f'跳过未修改文件 {file}')
                 continue
             if backup_file(file, label, instance):
                 update_cache(file, cache)
-                print(f'成功上传文件 {file}')
+                logging.debug(f'成功上传文件 {file}')
             else:
-                print(f'上传文件失败 {file}')
+                logging.warning(f'上传文件失败 {file}')
     finally:
         save_cache(label, cache)
         post_backup(instance)
 
 
+def config_logging():
+    # 配置日志
+    logging.basicConfig(
+        level=logging_level,
+        format='[%(levelname)s][%(asctime)s] %(message)s',  # 日志格式：日志级别 + 时间 + 信息
+        datefmt='%Y-%m-%d %H:%M:%S',  # 时间格式：年-月-日 时:分:秒
+        handlers=[
+            logging.StreamHandler()  # 输出到控制台
+        ]
+    )
+
+
 def main():
     if len(sys.argv) < 2:
-        print("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
+        logging.warning("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
         sys.exit(1)
     label = sys.argv[1]
 
     for instance in instances.keys():
-        print(f'开始备份实例 {instance}，标签 {label}')
+        logging.info(f'开始备份实例 {instance}，标签 {label}')
         backup_instance(instance, label)
-        print(f'实例 {instance} 的备份完成')
+        logging.info(f'实例 {instance} 的备份完成')
 
 
 if __name__ == '__main__':
