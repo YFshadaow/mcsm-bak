@@ -1,5 +1,6 @@
 import logging
 
+max_upload_threads = 4
 logging_level = logging.INFO
 target_path = '/apps/mcsm_bak'
 mcsm_url = 'https://my.console.com:23333'
