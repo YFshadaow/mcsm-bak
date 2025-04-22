@@ -36,20 +36,6 @@ def backup_file(file_path: str, label: str, instance: str) -> bool:
     return False
 
 
-def walk_files(base : str, current: str = None) -> Iterator[str]:
-    base_path = Path(base)
-    current_path = base_path if current is None else Path(current)
-
-    for entry in sorted(current_path.iterdir()):
-        # 如果是文件，返回相对于 base 的路径
-        if entry.is_file():
-            yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
-        elif entry.is_dir():
-            # 如果是目录，递归调用并返回子目录中的文件
-            yield from walk_files(base, str(entry))
-
-
-
 def is_excluded(file_path: str) -> bool:
     # 排除缓存文件
     if re.match(r'.*^\.mcsm_bak\..+\.json$', file_path):
@@ -58,6 +44,21 @@ def is_excluded(file_path: str) -> bool:
         if re.match(pattern, file_path):
             return True
     return False
+
+
+def walk_files(base : str, current: str = None) -> Iterator[str]:
+    base_path = Path(base)
+    current_path = base_path if current is None else Path(current)
+
+    for entry in sorted(current_path.iterdir()):
+        if is_excluded(str(entry)):
+            continue
+        # 如果是文件，返回相对于 base 的路径
+        if entry.is_file():
+            yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
+        elif entry.is_dir():
+            # 如果是目录，递归调用并返回子目录中的文件
+            yield from walk_files(base, str(entry))
 
 
 def should_backup(file_path: str, cache: dict) -> bool:
