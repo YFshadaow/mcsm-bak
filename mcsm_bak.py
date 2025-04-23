@@ -130,7 +130,7 @@ def update_cache(file_path: str, cache: dict):
 
 stop_event = threading.Event()
 
-def producer(file_queue: Queue, cache: dict):
+def producer(file_queue: Queue, cache: dict, uploader_count: int):
     for file in walk_files('.'):
         if is_excluded(file):
             logging.debug(f'跳过排除文件 {file}')
@@ -147,8 +147,8 @@ def producer(file_queue: Queue, cache: dict):
                 break
             except Full:
                 continue
-
-    file_queue.put(None)
+    for _ in range(uploader_count):
+        file_queue.put(None)
 
 
 def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
