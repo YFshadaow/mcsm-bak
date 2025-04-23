@@ -110,8 +110,8 @@ def load_cache(label: str) -> dict:
 
 
 def save_cache(label: str, cache: dict):
-    logging.info(f'正在保存缓存文件 {cache} ...')
     cache_file = Path(f'.mcsm_bak.{label}.json')
+    logging.info(f'正在保存缓存文件 {cache_file} ...')
     with open(cache_file, 'w', encoding='utf-8') as f:
         json.dump(cache, f, indent=4)
         logging.info(f'保存缓存文件 {cache_file}')
@@ -201,7 +201,7 @@ def backup_instance(instance: str, label: str):
     cache = load_cache(label)
 
     threads = []
-    producer_thread = threading.Thread(target=producer, args=(file_queue, cache))
+    producer_thread = threading.Thread(target=producer, args=(file_queue, cache, max_upload_threads))
     threads.append(producer_thread)
     producer_thread.start()
     for _ in range(max_upload_threads):
