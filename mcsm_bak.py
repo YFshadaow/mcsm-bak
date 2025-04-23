@@ -19,14 +19,18 @@ def walk_files(base : str, current: str = None) -> Iterator[str]:
     current_path = base_path if current is None else Path(current)
 
     for entry in sorted(current_path.iterdir()):
-        if is_excluded(str(entry)):
+        try:
+            if is_excluded(str(entry)):
+                continue
+            # 如果是文件，返回相对于 base 的路径
+            if entry.is_file():
+                yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
+            elif entry.is_dir():
+                # 如果是目录，递归调用并返回子目录中的文件
+                yield from walk_files(base, str(entry))
+        except (FileNotFoundError, PermissionError) as e:
+            logging.warning(f'访问文件或目录失败: {e}')
             continue
-        # 如果是文件，返回相对于 base 的路径
-        if entry.is_file():
-            yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
-        elif entry.is_dir():
-            # 如果是目录，递归调用并返回子目录中的文件
-            yield from walk_files(base, str(entry))
 
 
 def backup_file(file_path: str, label: str, instance: str) -> bool:
@@ -51,18 +55,25 @@ def should_backup(file_path: str, cache: dict) -> bool:
     normalized_path = normalize(file_path)
     if normalized_path not in cache:
         return True
-    mtime = get_file_mtime(normalized_path)
-    size = get_file_size(normalized_path)
+    try:
+        mtime = get_file_mtime(normalized_path)
+        size = get_file_size(normalized_path)
+    except (FileNotFoundError, PermissionError) as e:
+        logging.warning(f'访问文件失败: {e}')
+        return False
     if cache[normalized_path]['mtime'] == mtime and cache[normalized_path]['size'] == size:
         return False
-    sha256 = get_file_sha256(normalized_path)
+    try:
+        sha256 = get_file_sha256(normalized_path)
+    except (FileNotFoundError, PermissionError) as e:
+        logging.warning(f'访问文件失败: {e}')
+        return False
     if cache[normalized_path]['sha256'] == sha256:
         return False
     return True
 
 
 def pre_backup(instance: str) -> bool:
-
     try:
         status = get_status(instance)
         logging.info(f'获取到实例 {instance} 的状态: {status}')
@@ -137,7 +148,7 @@ def producer(file_queue: Queue, cache: dict, uploader_count: int):
             logging.debug(f'跳过排除文件 {file}')
             continue
         if not should_backup(file, cache):
-            logging.debug(f'跳过未修改文件 {file}')
+            logging.debug(f'跳过未修改/无效文件 {file}')
             continue
         while True:
             if stop_event.is_set():
@@ -160,7 +171,7 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
             return
         file = file_queue.get()
         if file is None:
-            logging.info('没有更多文件，停止上传')
+            logging.info('没有更多文件，当前线程停止上传')
             update_queue.put(None)
             return
         if backup_file(file, label, instance):
@@ -177,7 +188,7 @@ def updater(update_queue: Queue, cache: dict, uploader_count: int):
         if file is None:
             finished_uploader_count += 1
             if finished_uploader_count == uploader_count:
-                logging.info('所有上传器已完成，停止更新缓存')
+                logging.info('所有上传已完成，停止更新缓存')
                 return
             continue
         update_cache(file, cache)
