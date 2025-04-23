@@ -110,6 +110,7 @@ def load_cache(label: str) -> dict:
 
 
 def save_cache(label: str, cache: dict):
+    logging.info(f'正在保存缓存文件 {cache} ...')
     cache_file = Path(f'.mcsm_bak.{label}.json')
     with open(cache_file, 'w', encoding='utf-8') as f:
         json.dump(cache, f, indent=4)
@@ -257,7 +258,7 @@ def main():
             return
         logging.info(f'开始备份实例 {instance}，标签 {label}')
         backup_instance(instance, label)
-        logging.info(f'实例 {instance} 的备份完成')
+        logging.info(f'实例 {instance} 的备份结束')
 
 
 if __name__ == '__main__':
