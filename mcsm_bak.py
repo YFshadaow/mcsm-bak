@@ -191,7 +191,10 @@ def updater(update_queue: Queue, cache: dict, uploader_count: int):
                 logging.info('所有上传已完成，停止更新缓存')
                 return
             continue
-        update_cache(file, cache)
+        try:
+            update_cache(file, cache)
+        except (FileNotFoundError, PermissionError) as e:
+            logging.warning(f'文件 {file} 更新缓存失败: {e}')
 
 
 def backup_instance(instance: str, label: str):
