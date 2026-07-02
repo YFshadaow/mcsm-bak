@@ -5,7 +5,7 @@ from requests import Response
 
 from config import api_key, mcsm_url, instances, daemonId
 
-basic_params ={
+basic_params = {
     "apikey": api_key,
 }
 

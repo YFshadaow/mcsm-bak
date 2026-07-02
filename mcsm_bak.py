@@ -14,7 +14,7 @@ from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto
 from utils import get_file_mtime, get_file_size, get_file_sha256, normalize, is_excluded
 
 
-def walk_files(base : str, current: str = None) -> Iterator[str]:
+def walk_files(base: str, current: str = None) -> Iterator[str]:
     base_path = Path(base)
     current_path = base_path if current is None else Path(current)
 
@@ -22,11 +22,11 @@ def walk_files(base : str, current: str = None) -> Iterator[str]:
         try:
             if is_excluded(str(entry)):
                 continue
-            # 如果是文件，返回相对于 base 的路径
+            # Yield relative path as string if entry is a file
             if entry.is_file():
-                yield str(entry.relative_to(base_path))  # 返回字符串形式的相对路径
+                yield str(entry.relative_to(base_path))
             elif entry.is_dir():
-                # 如果是目录，递归调用并返回子目录中的文件
+                # Recursively yield files from subdirectories if entry is a directory
                 yield from walk_files(base, str(entry))
         except (FileNotFoundError, PermissionError) as e:
             logging.warning(f'访问文件或目录失败: {e}')
@@ -51,26 +51,31 @@ def backup_file(file_path: str, label: str, instance: str) -> bool:
     return False
 
 
-def should_backup(file_path: str, cache: dict) -> bool:
+def should_backup(file_path: str, cache: dict) -> tuple:
     normalized_path = normalize(file_path)
-    if normalized_path not in cache:
-        return True
+    
     try:
         mtime = get_file_mtime(normalized_path)
         size = get_file_size(normalized_path)
     except (FileNotFoundError, PermissionError) as e:
         logging.warning(f'访问文件失败: {e}')
-        return False
-    if cache[normalized_path]['mtime'] == mtime and cache[normalized_path]['size'] == size:
-        return False
-    try:
-        sha256 = get_file_sha256(normalized_path)
-    except (FileNotFoundError, PermissionError) as e:
-        logging.warning(f'访问文件失败: {e}')
-        return False
-    if cache[normalized_path]['sha256'] == sha256:
-        return False
-    return True
+        return False, {}
+        
+    is_new_or_changed = False
+    if normalized_path not in cache:
+        is_new_or_changed = True
+    elif cache[normalized_path]['mtime'] != mtime or cache[normalized_path]['size'] != size:
+        is_new_or_changed = True
+        
+    if is_new_or_changed:
+        try:
+            sha256 = get_file_sha256(normalized_path)
+        except (FileNotFoundError, PermissionError) as e:
+            logging.warning(f'访问文件失败: {e}')
+            return False, {}
+        return True, {'mtime': mtime, 'size': size, 'sha256': sha256}
+        
+    return False, {}
 
 
 def pre_backup(instance: str) -> bool:
@@ -128,16 +133,9 @@ def save_cache(label: str, cache: dict):
         logging.info(f'保存缓存文件 {cache_file}')
 
 
-def update_cache(file_path: str, cache: dict):
+def update_cache(file_path: str, file_meta: dict, cache: dict):
     normalized_path = normalize(file_path)
-    mtime = get_file_mtime(normalized_path)
-    size = get_file_size(normalized_path)
-    sha256 = get_file_sha256(normalized_path)
-    cache[normalized_path] = {
-        'mtime': mtime,
-        'size': size,
-        'sha256': sha256
-    }
+    cache[normalized_path] = file_meta
 
 
 stop_event = threading.Event()
@@ -147,18 +145,22 @@ def producer(file_queue: Queue, cache: dict, uploader_count: int):
         if is_excluded(file):
             logging.debug(f'跳过排除文件 {file}')
             continue
-        if not should_backup(file, cache):
-            logging.debug(f'跳过未修改/无效文件 {file}')
+            
+        needs_backup, file_meta = should_backup(file, cache)
+        if not needs_backup:
+            logging.debug(f'跳过未修改或无效文件 {file}')
             continue
+            
         while True:
             if stop_event.is_set():
                 logging.info('接收到停止信号，停止添加文件')
                 return
             try:
-                file_queue.put(file, timeout=1)
+                file_queue.put((file, file_meta), timeout=1)
                 break
             except Full:
                 continue
+                
     for _ in range(uploader_count):
         file_queue.put(None)
 
@@ -169,13 +171,16 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
             logging.info('接收到停止信号，停止上传文件')
             update_queue.put(None)
             return
-        file = file_queue.get()
-        if file is None:
+            
+        task = file_queue.get()
+        if task is None:
             logging.info('没有更多文件，当前线程停止上传')
             update_queue.put(None)
             return
+            
+        file, file_meta = task
         if backup_file(file, label, instance):
-            update_queue.put(file)
+            update_queue.put((file, file_meta))
             logging.debug(f'成功上传文件 {file}')
         else:
             logging.warning(f'上传文件失败 {file}')
@@ -184,17 +189,16 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
 def updater(update_queue: Queue, cache: dict, uploader_count: int):
     finished_uploader_count = 0
     while True:
-        file = update_queue.get()
-        if file is None:
+        task = update_queue.get()
+        if task is None:
             finished_uploader_count += 1
             if finished_uploader_count == uploader_count:
                 logging.info('所有上传已完成，停止更新缓存')
                 return
             continue
-        try:
-            update_cache(file, cache)
-        except (FileNotFoundError, PermissionError) as e:
-            logging.warning(f'文件 {file} 更新缓存失败: {e}')
+            
+        file, file_meta = task
+        update_cache(file, file_meta, cache)
 
 
 def backup_instance(instance: str, label: str):
@@ -218,10 +222,12 @@ def backup_instance(instance: str, label: str):
     producer_thread = threading.Thread(target=producer, args=(file_queue, cache, max_upload_threads))
     threads.append(producer_thread)
     producer_thread.start()
+    
     for _ in range(max_upload_threads):
         uploader_thread = threading.Thread(target=uploader, args=(file_queue, update_queue, label, instance))
         threads.append(uploader_thread)
         uploader_thread.start()
+        
     updater_thread = threading.Thread(target=updater, args=(update_queue, cache, max_upload_threads))
     threads.append(updater_thread)
     updater_thread.start()
@@ -231,7 +237,7 @@ def backup_instance(instance: str, label: str):
             thread.join()
         logging.info('所有线程已完成')
     except (KeyboardInterrupt, SystemExit):
-        logging.info('接收到停止信号，正在停止所有线程...')
+        logging.info('接收到停止信号，正在停止所有线程')
         stop_event.set()
         for thread in threads:
             thread.join()
@@ -242,19 +248,19 @@ def backup_instance(instance: str, label: str):
 
 
 def config_logging():
-    # 配置日志
+    # Configure logging module parameters
     logging.basicConfig(
         level=logging_level,
-        format='[%(levelname)s] [%(asctime)s] %(message)s',  # 日志格式：日志级别 + 时间 + 信息
-        datefmt='%Y-%m-%d %H:%M:%S',  # 时间格式：年-月-日 时:分:秒
+        format='[%(levelname)s] [%(asctime)s] %(message)s',  # Set log format to include level time and message
+        datefmt='%Y-%m-%d %H:%M:%S',  # Set datetime format for logging output
         handlers=[
-            logging.StreamHandler()  # 输出到控制台
+            logging.StreamHandler()  # Output logs directly to the console stream
         ]
     )
 
 
 def handle_sigterm(signum, frame):
-    logging.warning('接收到 SIGTERM 信号，正在退出...')
+    logging.warning('接收到 SIGTERM 信号，正在退出')
     raise SystemExit('程序被终止')
 
 
@@ -277,4 +283,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
