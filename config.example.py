@@ -13,3 +13,6 @@ exclusions = [
     r'.*/dynmap/web(/.*)?$',
     r'.*/CoreProtect/database\.db$'
 ]
+
+baidu_client_id = '123abc'
+baidu_client_secret = '123abc'

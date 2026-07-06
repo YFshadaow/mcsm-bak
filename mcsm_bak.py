@@ -2,16 +2,19 @@ import json
 import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 from pathlib import Path
 from queue import Queue, Full
 from typing import Iterator
 
-from config import target_path, instances, logging_level, max_upload_threads
+from config import target_path, instances, logging_level, max_upload_threads, baidu_client_id, baidu_client_secret
 from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto_save
 from utils import get_file_mtime, get_file_size, get_file_sha256, normalize, is_excluded
+from baidu_pcs import create_client
+
+
+pcs_client = None
 
 
 def walk_files(base: str, current: str = None) -> Iterator[str]:
@@ -35,20 +38,8 @@ def walk_files(base: str, current: str = None) -> Iterator[str]:
 
 def backup_file(file_path: str, label: str, instance: str) -> bool:
     normalized_path = normalize(file_path)
-    final_target_path = Path(target_path) / label / instance / Path(normalized_path).parent
-    result = subprocess.run(
-        args=[
-            '/root/BaiduPCS-Go/BaiduPCS-Go',
-            'upload',
-            normalized_path,
-            final_target_path
-        ],
-        capture_output=True,
-        text=True
-    )
-    if result.returncode == 0:
-        return True
-    return False
+    remote_path = f'{target_path}/{label}/{instance}/{normalized_path}'
+    return pcs_client.upload(normalized_path, remote_path)
 
 
 def should_backup(file_path: str, cache: dict) -> tuple:
@@ -179,7 +170,12 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
             return
             
         file, file_meta = task
-        if backup_file(file, label, instance):
+        try:
+            ok = backup_file(file, label, instance)
+        except Exception as e:
+            logging.warning(f'上传文件异常 {file}: {e}')
+            ok = False
+        if ok:
             update_queue.put((file, file_meta))
             logging.debug(f'成功上传文件 {file}')
         else:
@@ -210,7 +206,7 @@ def backup_instance(instance: str, label: str):
         return
     os.chdir(cwd)
 
-    subprocess.run(['/root/BaiduPCS-Go/BaiduPCS-Go', 'mkdir', f'{target_path}/{label}/{instance}'], capture_output=True)
+    pcs_client.mkdir(f'{target_path}/{label}/{instance}')
 
     if not pre_backup(instance):
         return
@@ -269,6 +265,12 @@ def handle_sigterm(signum, frame):
 def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
     config_logging()
+
+    global pcs_client
+    pcs_client = create_client(baidu_client_id, baidu_client_secret)
+    if pcs_client is None:
+        logging.error('Failed to initialize BaiduPCSClient')
+        sys.exit(1)
 
     if len(sys.argv) < 2:
         logging.warning("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
