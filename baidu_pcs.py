@@ -6,10 +6,8 @@ import sys
 import tempfile
 import time
 
-SDK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pythonsdk_20220616')
-sys.path.insert(0, SDK_DIR)
-from openapi_client.api import fileupload_api, auth_api  # noqa: E402
-import openapi_client  # noqa: E402
+from openapi_client.api import fileupload_api, auth_api
+import openapi_client
 
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.baidu_token.json')
 
