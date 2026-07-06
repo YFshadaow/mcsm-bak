@@ -210,6 +210,8 @@ def backup_instance(instance: str, label: str):
         return
     os.chdir(cwd)
 
+    subprocess.run(['/root/BaiduPCS-Go/BaiduPCS-Go', 'mkdir', f'{target_path}/{label}/{instance}'], capture_output=True)
+
     if not pre_backup(instance):
         return
 
