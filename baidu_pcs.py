@@ -73,6 +73,9 @@ class BaiduPCSClient:
             logging.warning(f"Cannot read file {local_path}: {e}")
             return False
 
+        if not chunk_md5s:
+            chunk_md5s = [hashlib.md5(b'').hexdigest()]
+
         block_list = json.dumps(chunk_md5s)
         return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
 
@@ -84,12 +87,12 @@ class BaiduPCSClient:
             self._refresh_access_token()
             return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
         except Exception as e:
-            logging.warning(f"Precreate error: {e}")
+            logging.warning(f"Precreate error for {remote_path}: {e}")
             return False
 
         errno = precreate.get('errno', 0)
         if errno != 0:
-            logging.warning(f"Precreate failed: errno={errno}, {precreate}")
+            logging.warning(f"Precreate failed for {remote_path}: errno={errno}, {precreate}")
             return False
 
         uploadid = precreate['uploadid']
@@ -103,12 +106,12 @@ class BaiduPCSClient:
                 self._refresh_access_token()
                 return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
             except Exception as e:
-                logging.warning(f"Superfile2 error: {e}")
+                logging.warning(f"Superfile2 error for {remote_path}: {e}")
                 return False
 
             errno = super_resp.get('errno', 0)
             if errno != 0:
-                logging.warning(f"Superfile2 failed: errno={errno}, {super_resp}")
+                logging.warning(f"Superfile2 failed for {remote_path}: errno={errno}, {super_resp}")
                 return False
         else:
             for i in range(len(chunk_md5s)):
@@ -132,7 +135,7 @@ class BaiduPCSClient:
                     self._refresh_access_token()
                     return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
                 except Exception as e:
-                    logging.warning(f"Superfile2 error for chunk {i}: {e}")
+                    logging.warning(f"Superfile2 error for {remote_path} chunk={i}: {e}")
                     return False
                 finally:
                     try:
@@ -142,7 +145,7 @@ class BaiduPCSClient:
 
                 errno = super_resp.get('errno', 0)
                 if errno != 0:
-                    logging.warning(f"Superfile2 failed for chunk {i}: errno={errno}, {super_resp}")
+                    logging.warning(f"Superfile2 failed for {remote_path} chunk={i}: errno={errno}, {super_resp}")
                     return False
 
         try:
@@ -152,12 +155,12 @@ class BaiduPCSClient:
             self._refresh_access_token()
             return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
         except Exception as e:
-            logging.warning(f"Create error: {e}")
+            logging.warning(f"Create error for {remote_path}: {e}")
             return False
 
         errno = create.get('errno', 0)
         if errno != 0:
-            logging.warning(f"Create failed: errno={errno}, {create}")
+            logging.warning(f"Create failed for {remote_path}: errno={errno}, {create}")
             return False
 
         return True
