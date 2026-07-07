@@ -7,6 +7,7 @@ import tempfile
 import time
 
 from openapi_client.api import fileupload_api, auth_api
+import openapi_client
 
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.baidu_token.json')
 
