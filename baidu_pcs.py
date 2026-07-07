@@ -7,7 +7,6 @@ import tempfile
 import time
 
 from openapi_client.api import fileupload_api, auth_api
-import openapi_client
 
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.baidu_token.json')
 
@@ -50,10 +49,6 @@ class BaiduPCSClient:
         try:
             resp = self._upload_api.xpanfilecreate(
                 self._access_token, remote_path, 1, 0, '', '[]', rtype=0)
-        except openapi_client.UnauthorizedException:
-            if self._refresh_access_token():
-                return self.mkdir(remote_path)
-            return False
         except Exception as e:
             logging.warning(f"Mkdir error: {e}")
             return False
@@ -93,10 +88,6 @@ class BaiduPCSClient:
         try:
             precreate = self._upload_api.xpanfileprecreate(
                 self._access_token, remote_path, 0, file_size, 1, block_list, rtype=3)
-        except openapi_client.UnauthorizedException:
-            if self._refresh_access_token():
-                return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
-            return False
         except Exception as e:
             logging.warning(f"Precreate error for {remote_path}: {e}")
             return False
@@ -113,10 +104,6 @@ class BaiduPCSClient:
                 with open(local_path, 'rb') as f:
                     super_resp = self._upload_api.pcssuperfile2(
                         self._access_token, '0', remote_path, uploadid, 'tmpfile', file=f)
-            except openapi_client.UnauthorizedException:
-                if self._refresh_access_token():
-                    return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
-                return False
             except Exception as e:
                 logging.warning(f"Superfile2 error for {remote_path}: {e}")
                 return False
@@ -148,10 +135,6 @@ class BaiduPCSClient:
                     with open(tmp_path, 'rb') as chunk_file:
                         super_resp = self._upload_api.pcssuperfile2(
                             self._access_token, str(i), remote_path, uploadid, 'tmpfile', file=chunk_file)
-                except openapi_client.UnauthorizedException:
-                    if self._refresh_access_token():
-                        return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
-                    return False
                 except Exception as e:
                     logging.warning(f"Superfile2 error for {remote_path} chunk={i}: {e}")
                     return False
@@ -169,10 +152,6 @@ class BaiduPCSClient:
         try:
             create = self._upload_api.xpanfilecreate(
                 self._access_token, remote_path, 0, file_size, uploadid, block_list, rtype=3)
-        except openapi_client.UnauthorizedException:
-            if self._refresh_access_token():
-                return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
-            return False
         except Exception as e:
             logging.warning(f"Create error for {remote_path}: {e}")
             return False
