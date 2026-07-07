@@ -263,6 +263,10 @@ def handle_sigterm(signum, frame):
 
 def dump_cache(label, instance=None):
     if instance:
+        db_path = os.path.join(DB_DIR, label, instance, 'cache.db')
+        if not os.path.exists(db_path):
+            logging.info(f'{label}/{instance}: no cache database')
+            return
         conn = open_db(label, instance)
         cache = load_cache(conn)
         conn.close()
@@ -276,6 +280,10 @@ def dump_cache(label, instance=None):
     else:
         all_cache = {}
         for inst in instances.keys():
+            db_path = os.path.join(DB_DIR, label, inst, 'cache.db')
+            if not os.path.exists(db_path):
+                logging.info(f'{label}/{inst}: no cache database')
+                continue
             conn = open_db(label, inst)
             cache = load_cache(conn)
             conn.close()
