@@ -5,7 +5,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from queue import Queue, Full
+from queue import Queue, Full, Empty
 from typing import Iterator
 
 from config import target_path, instances, logging_level, max_upload_threads, baidu_client_id, baidu_client_secret
@@ -145,7 +145,7 @@ def producer(file_queue: Queue, cache: dict, uploader_count: int):
         while True:
             if stop_event.is_set():
                 logging.info('接收到停止信号，停止添加文件')
-                return
+                break
             try:
                 file_queue.put((file, file_meta), timeout=1)
                 break
@@ -163,7 +163,10 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
             update_queue.put(None)
             return
             
-        task = file_queue.get()
+        try:
+            task = file_queue.get(timeout=1)
+        except Empty:
+            continue
         if task is None:
             logging.info('没有更多文件，当前线程停止上传')
             update_queue.put(None)
