@@ -133,6 +133,8 @@ def producer(file_queue: Queue, cache: dict, uploader_count: int):
                 break
             except Full:
                 continue
+        if stop_event.is_set():
+            break
                 
     for _ in range(uploader_count):
         file_queue.put(None)
@@ -260,18 +262,32 @@ def handle_sigterm(signum, frame):
 
 
 def dump_cache(label, instance=None):
-    targets = [instance] if instance else instances.keys()
-    for inst in targets:
-        conn = open_db(label, inst)
+    if instance:
+        conn = open_db(label, instance)
         cache = load_cache(conn)
         conn.close()
         if not cache:
-            logging.info(f'{label}/{inst}: no cache entries')
-            continue
-        dump_path = os.path.join(DB_DIR, label, inst, 'dump.json')
+            logging.info(f'{label}/{instance}: no cache entries')
+            return
+        dump_path = os.path.join(DB_DIR, label, instance, 'dump.json')
         with open(dump_path, 'w', encoding='utf-8') as f:
             json.dump(cache, f, indent=4, ensure_ascii=False)
-        logging.info(f'{label}/{inst}: {len(cache)} entries → {dump_path}')
+        logging.info(f'{label}/{instance}: {len(cache)} entries → {dump_path}')
+    else:
+        all_cache = {}
+        for inst in instances.keys():
+            conn = open_db(label, inst)
+            cache = load_cache(conn)
+            conn.close()
+            if cache:
+                all_cache[inst] = cache
+        if not all_cache:
+            logging.info(f'{label}: no cache entries')
+            return
+        dump_path = os.path.join(DB_DIR, label, 'dump.json')
+        with open(dump_path, 'w', encoding='utf-8') as f:
+            json.dump(all_cache, f, indent=4, ensure_ascii=False)
+        logging.info(f'{label}: {sum(len(c) for c in all_cache.values())} entries → {dump_path}')
 
 
 def main():

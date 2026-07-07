@@ -7,7 +7,7 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.mcsm_bak')
 def open_db(label, instance):
     db_path = os.path.join(DB_DIR, label, instance)
     os.makedirs(db_path, exist_ok=True)
-    conn = sqlite3.connect(os.path.join(db_path, 'cache.db'))
+    conn = sqlite3.connect(os.path.join(db_path, 'cache.db'), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("""
