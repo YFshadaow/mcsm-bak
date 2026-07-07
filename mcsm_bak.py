@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import signal
@@ -12,6 +11,7 @@ from config import target_path, instances, logging_level, max_upload_threads, ba
 from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto_save
 from utils import get_file_mtime, get_file_size, get_file_sha256, normalize, is_excluded
 from baidu_pcs import create_client
+from cache_db import open_db, load_cache, write_entry
 
 
 pcs_client = None
@@ -105,25 +105,6 @@ def post_backup(instance: str):
         logging.warning(f'获取实例 {instance} 的状态失败: {e}，无法恢复自动保存')
 
 
-def load_cache(label: str) -> dict:
-    cache_file = Path(f'.mcsm_bak.{label}.json')
-    if cache_file.exists():
-        with open(cache_file, 'r') as f:
-            logging.info(f'读取缓存文件 {cache_file}')
-            return json.load(f)
-    else:
-        logging.info(f'未找到缓存文件 {cache_file}，将创建新的缓存')
-        return {}
-
-
-def save_cache(label: str, cache: dict):
-    cache_file = Path(f'.mcsm_bak.{label}.json')
-    logging.info(f'正在保存缓存文件 {cache_file} ...')
-    with open(cache_file, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, indent=4)
-        logging.info(f'保存缓存文件 {cache_file}')
-
-
 def update_cache(file_path: str, file_meta: dict, cache: dict):
     normalized_path = normalize(file_path)
     cache[normalized_path] = file_meta
@@ -185,7 +166,7 @@ def uploader(file_queue: Queue, update_queue: Queue, label: str, instance: str):
             logging.warning(f'上传文件失败 {file}')
 
 
-def updater(update_queue: Queue, cache: dict, uploader_count: int):
+def updater(update_queue: Queue, cache: dict, uploader_count: int, conn):
     finished_uploader_count = 0
     while True:
         task = update_queue.get()
@@ -198,6 +179,10 @@ def updater(update_queue: Queue, cache: dict, uploader_count: int):
             
         file, file_meta = task
         update_cache(file, file_meta, cache)
+        try:
+            write_entry(conn, file, file_meta)
+        except Exception as e:
+            logging.error(f'写入缓存失败 {file}: {e}')
 
 
 def backup_instance(instance: str, label: str):
@@ -217,7 +202,14 @@ def backup_instance(instance: str, label: str):
     stop_event.clear()
     file_queue = Queue(maxsize=100)
     update_queue = Queue()
-    cache = load_cache(label)
+
+    conn = None
+    try:
+        conn = open_db(label, instance)
+    except Exception as e:
+        logging.error(f'打开数据库失败 {label}/{instance}: {e}')
+        return
+    cache = load_cache(conn)
 
     threads = []
     producer_thread = threading.Thread(target=producer, args=(file_queue, cache, max_upload_threads))
@@ -229,7 +221,7 @@ def backup_instance(instance: str, label: str):
         threads.append(uploader_thread)
         uploader_thread.start()
         
-    updater_thread = threading.Thread(target=updater, args=(update_queue, cache, max_upload_threads))
+    updater_thread = threading.Thread(target=updater, args=(update_queue, cache, max_upload_threads, conn))
     threads.append(updater_thread)
     updater_thread.start()
 
@@ -244,7 +236,8 @@ def backup_instance(instance: str, label: str):
             thread.join()
         logging.info('所有线程已停止')
     finally:
-        save_cache(label, cache)
+        if conn:
+            conn.close()
         post_backup(instance)
 
 
@@ -284,7 +277,10 @@ def main():
         if stop_event.is_set():
             return
         logging.info(f'开始备份实例 {instance}，标签 {label}')
-        backup_instance(instance, label)
+        try:
+            backup_instance(instance, label)
+        except Exception as e:
+            logging.error(f'实例 {instance} 备份异常: {e}')
         logging.info(f'实例 {instance} 的备份结束')
 
 

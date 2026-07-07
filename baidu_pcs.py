@@ -25,25 +25,35 @@ class BaiduPCSClient:
 
     def _refresh_access_token(self):
         auth = auth_api.AuthApi(self._api_client)
-        resp = auth.oauth_token_refresh_token(
-            self._refresh_token, self._client_id, self._client_secret)
+        try:
+            resp = auth.oauth_token_refresh_token(
+                self._refresh_token, self._client_id, self._client_secret)
+        except Exception as e:
+            logging.error(f"Token refresh network error: {e}")
+            return False
+
         if 'error' in resp:
             logging.error(f"Token refresh failed: {resp.get('error_description', resp)}")
-            raise Exception(f"Token refresh failed: {resp.get('error_description', resp)}")
+            return False
         self._access_token = resp['access_token']
         if 'refresh_token' in resp:
             self._refresh_token = resp['refresh_token']
-        with open(TOKEN_FILE, 'w') as f:
-            json.dump({'refresh_token': self._refresh_token}, f)
+        try:
+            with open(TOKEN_FILE, 'w') as f:
+                json.dump({'refresh_token': self._refresh_token}, f)
+        except OSError as e:
+            logging.error(f"Failed to save token file: {e}")
         logging.info("Access token refreshed and saved")
+        return True
 
     def mkdir(self, remote_path):
         try:
             resp = self._upload_api.xpanfilecreate(
                 self._access_token, remote_path, 1, 0, '', '[]', rtype=0)
         except openapi_client.UnauthorizedException:
-            self._refresh_access_token()
-            return self.mkdir(remote_path)
+            if self._refresh_access_token():
+                return self.mkdir(remote_path)
+            return False
         except Exception as e:
             logging.warning(f"Mkdir error: {e}")
             return False
@@ -84,8 +94,9 @@ class BaiduPCSClient:
             precreate = self._upload_api.xpanfileprecreate(
                 self._access_token, remote_path, 0, file_size, 1, block_list, rtype=3)
         except openapi_client.UnauthorizedException:
-            self._refresh_access_token()
-            return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+            if self._refresh_access_token():
+                return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+            return False
         except Exception as e:
             logging.warning(f"Precreate error for {remote_path}: {e}")
             return False
@@ -103,8 +114,9 @@ class BaiduPCSClient:
                     super_resp = self._upload_api.pcssuperfile2(
                         self._access_token, '0', remote_path, uploadid, 'tmpfile', file=f)
             except openapi_client.UnauthorizedException:
-                self._refresh_access_token()
-                return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+                if self._refresh_access_token():
+                    return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+                return False
             except Exception as e:
                 logging.warning(f"Superfile2 error for {remote_path}: {e}")
                 return False
@@ -123,7 +135,12 @@ class BaiduPCSClient:
                     logging.warning(f"Cannot read chunk {i} of {local_path}: {e}")
                     return False
 
-                tmp = tempfile.NamedTemporaryFile(suffix='.part', delete=False)
+                try:
+                    tmp = tempfile.NamedTemporaryFile(suffix='.part', delete=False)
+                except OSError as e:
+                    logging.warning(f"Cannot create temp file for {remote_path} chunk={i}: {e}")
+                    return False
+
                 tmp_path = tmp.name
                 try:
                     tmp.write(chunk_data)
@@ -132,8 +149,9 @@ class BaiduPCSClient:
                         super_resp = self._upload_api.pcssuperfile2(
                             self._access_token, str(i), remote_path, uploadid, 'tmpfile', file=chunk_file)
                 except openapi_client.UnauthorizedException:
-                    self._refresh_access_token()
-                    return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+                    if self._refresh_access_token():
+                        return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+                    return False
                 except Exception as e:
                     logging.warning(f"Superfile2 error for {remote_path} chunk={i}: {e}")
                     return False
@@ -152,8 +170,9 @@ class BaiduPCSClient:
             create = self._upload_api.xpanfilecreate(
                 self._access_token, remote_path, 0, file_size, uploadid, block_list, rtype=3)
         except openapi_client.UnauthorizedException:
-            self._refresh_access_token()
-            return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+            if self._refresh_access_token():
+                return self._do_upload(local_path, remote_path, file_size, block_list, chunk_md5s)
+            return False
         except Exception as e:
             logging.warning(f"Create error for {remote_path}: {e}")
             return False
@@ -170,7 +189,12 @@ def device_auth(client_id, client_secret):
     api_client = openapi_client.ApiClient()
     auth = auth_api.AuthApi(api_client)
 
-    resp = auth.oauth_token_device_code(client_id, 'basic,netdisk')
+    try:
+        resp = auth.oauth_token_device_code(client_id, 'basic,netdisk')
+    except Exception as e:
+        logging.error(f"Device code request failed: {e}")
+        return None, None
+
     device_code = resp['device_code']
     user_code = resp['user_code']
     qrcode_url = resp.get('qrcode_url', '')
@@ -198,12 +222,18 @@ def device_auth(client_id, client_secret):
             else:
                 logging.error(f"Device token error: {e}")
                 return None, None
+        except Exception as e:
+            logging.error(f"Device token network error: {e}")
+            return None, None
 
         if 'access_token' in resp:
             access_token = resp['access_token']
             refresh_token = resp['refresh_token']
-            with open(TOKEN_FILE, 'w') as f:
-                json.dump({'refresh_token': refresh_token}, f)
+            try:
+                with open(TOKEN_FILE, 'w') as f:
+                    json.dump({'refresh_token': refresh_token}, f)
+            except OSError as e:
+                logging.error(f"Failed to save token file: {e}")
             logging.info(f"Device authorized, token saved to {TOKEN_FILE}")
             return access_token, refresh_token
         else:
@@ -224,13 +254,17 @@ def create_client(client_id=None, client_secret=None):
                 refresh_token = data.get('refresh_token')
                 if refresh_token:
                     client = BaiduPCSClient('', refresh_token, client_id, client_secret)
-                    client._refresh_access_token()
-                    return client
+                    if client._refresh_access_token():
+                        return client
         except Exception as e:
             logging.error(f"Failed to load or refresh token: {e}")
 
     logging.info("No valid token found, starting first-time authorization...")
-    access_token, refresh_token = device_auth(client_id, client_secret)
+    try:
+        access_token, refresh_token = device_auth(client_id, client_secret)
+    except Exception as e:
+        logging.error(f"Device authorization failed: {e}")
+        return None
     if access_token:
         return BaiduPCSClient(access_token, refresh_token, client_id, client_secret)
     return None
