@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import signal
@@ -11,7 +12,7 @@ from config import target_path, instances, logging_level, max_upload_threads, ba
 from mcsm_api import get_cwd, get_status, Status, disable_auto_save, enable_auto_save
 from utils import get_file_mtime, get_file_size, get_file_sha256, normalize, is_excluded
 from baidu_pcs import create_client
-from cache_db import open_db, load_cache, write_entry
+from cache_db import open_db, load_cache, write_entry, DB_DIR
 
 
 pcs_client = None
@@ -258,20 +259,45 @@ def handle_sigterm(signum, frame):
     raise SystemExit('程序被终止')
 
 
+def dump_cache(label, instance=None):
+    targets = [instance] if instance else instances.keys()
+    for inst in targets:
+        conn = open_db(label, inst)
+        cache = load_cache(conn)
+        conn.close()
+        if not cache:
+            logging.info(f'{label}/{inst}: no cache entries')
+            continue
+        dump_path = os.path.join(DB_DIR, label, inst, 'dump.json')
+        with open(dump_path, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=4, ensure_ascii=False)
+        logging.info(f'{label}/{inst}: {len(cache)} entries → {dump_path}')
+
+
 def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
     config_logging()
+
+    if len(sys.argv) < 2:
+        logging.warning("使用方法: python(3) mcsm_bak.py <备份标签> [--dump] [--instance <name>]")
+        sys.exit(1)
+    label = sys.argv[1]
+
+    if '--dump' in sys.argv:
+        instance = None
+        try:
+            idx = sys.argv.index('--instance')
+            instance = sys.argv[idx + 1]
+        except (ValueError, IndexError):
+            pass
+        dump_cache(label, instance)
+        return
 
     global pcs_client
     pcs_client = create_client(baidu_client_id, baidu_client_secret)
     if pcs_client is None:
         logging.error('Failed to initialize BaiduPCSClient')
         sys.exit(1)
-
-    if len(sys.argv) < 2:
-        logging.warning("使用方法: python(3) mcsm_bak.py <备份标签(如daily, weekly, monthly)>")
-        sys.exit(1)
-    label = sys.argv[1]
 
     for instance in instances.keys():
         if stop_event.is_set():
