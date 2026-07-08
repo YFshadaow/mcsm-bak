@@ -52,6 +52,9 @@ def should_backup(file_path: str, cache: dict) -> tuple:
     except (FileNotFoundError, PermissionError) as e:
         logging.warning(f'访问文件失败: {e}')
         return False, {}
+    
+    if size == 0:
+        return False, {}
         
     is_new_or_changed = False
     if normalized_path not in cache:
